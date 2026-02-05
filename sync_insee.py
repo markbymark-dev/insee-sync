@@ -71,35 +71,27 @@ def batch_insert_to_supabase(supabase: Client, records, batch_size=1000):
             supabase.table('insee_deces').insert(batch).execute()
             print(f"Batch {i//batch_size + 1}/{(total + batch_size - 1)//batch_size} inséré")
         except Exception as e:
-            print(f"Erreur: {e}")
+            print(f"Erreur batch: {e}")
 
 def main():
-    print("Démarrage de la synchronisation INSEE complète...")
+    print("Démarrage de la synchronisation INSEE complète (1975-2025)...")
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
     # Download all years from 1975 to 2025
     for year in range(1975, 2026):
         print(f"\n=== Année {year} ===")
 
-        # Try annual file first
+        # Try annual file
         url = f"{INSEE_BASE_URL}/Deces_{year}.zip"
         csv_content = download_and_extract_csv(url)
 
         if csv_content:
             records = parse_insee_csv(csv_content)
             print(f"{len(records)} enregistrements trouvés pour {year}")
-            batch_insert_to_supabase(supabase, records)
+            if records:
+                batch_insert_to_supabase(supabase, records)
         else:
-            # If annual file doesn't exist, try monthly files
-            print(f"Fichier annuel non trouvé, essai des fichiers mensuels...")
-            for month in range(1, 13):
-                url = f"{INSEE_BASE_URL}/Deces_{year}_M{month:02d}.zip"
-                csv_content = download_and_extract_csv(url)
-
-                if csv_content:
-                    records = parse_insee_csv(csv_content)
-                    print(f"{len(records)} enregistrements trouvés pour {year}-{month:02d}")
-                    batch_insert_to_supabase(supabase, records)
+            print(f"Fichier annuel {year} non disponible")
 
     print("\nSynchronisation terminée!")
 
