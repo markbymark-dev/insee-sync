@@ -4,6 +4,7 @@ import requests
 import zipfile
 import io
 import csv
+import sys
 from datetime import datetime
 from supabase import create_client, Client
 
@@ -64,18 +65,39 @@ def parse_insee_csv(csv_content):
 def batch_insert_to_supabase(supabase: Client, records, batch_size=1000):
     total = len(records)
     print(f"Insertion de {total} enregistrements...")
+    
+    failed_batches = 0
+    successful_batches = 0
 
     for i in range(0, total, batch_size):
         batch = records[i:i + batch_size]
         try:
-            supabase.table('insee_deces').insert(batch).execute()
-            print(f"Batch {i//batch_size + 1}/{(total + batch_size - 1)//batch_size} inséré")
+            result = supabase.table('insee_deces').insert(batch).execute()
+            successful_batches += 1
+            print(f"Batch {i//batch_size + 1}/{(total + batch_size - 1)//batch_size} inséré avec succès")
         except Exception as e:
-            print(f"Erreur batch: {e}")
+            failed_batches += 1
+            print(f"ERREUR batch {i//batch_size + 1}: {e}")
+            # Continue to try other batches but track failures
+    
+    if failed_batches > 0:
+        error_msg = f"ÉCHEC: {failed_batches} batch(s) ont échoué sur {successful_batches + failed_batches} total"
+        print(error_msg)
+        raise Exception(error_msg)
+    
+    print(f"Succès: {successful_batches} batch(s) insérés")
 
 def main():
     print("Démarrage de la synchronisation INSEE complète (1975-2025)...")
+    
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        print("ERREUR: Variables d'environnement SUPABASE_URL ou SUPABASE_KEY manquantes")
+        sys.exit(1)
+    
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    
+    total_records_inserted = 0
+    years_failed = []
 
     # Download all years from 1975 to 2025
     for year in range(1975, 2026):
@@ -86,14 +108,28 @@ def main():
         csv_content = download_and_extract_csv(url)
 
         if csv_content:
-            records = parse_insee_csv(csv_content)
-            print(f"{len(records)} enregistrements trouvés pour {year}")
-            if records:
-                batch_insert_to_supabase(supabase, records)
+            try:
+                records = parse_insee_csv(csv_content)
+                print(f"{len(records)} enregistrements trouvés pour {year}")
+                if records:
+                    batch_insert_to_supabase(supabase, records)
+                    total_records_inserted += len(records)
+            except Exception as e:
+                print(f"ERREUR pour l'année {year}: {e}")
+                years_failed.append(year)
         else:
             print(f"Fichier annuel {year} non disponible")
+            years_failed.append(year)
 
-    print("\nSynchronisation terminée!")
+    print(f"\n=== RÉSUMÉ ===")
+    print(f"Total d'enregistrements insérés: {total_records_inserted}")
+    
+    if years_failed:
+        print(f"Années échouées: {years_failed}")
+        print(f"ÉCHEC: {len(years_failed)} année(s) n'ont pas pu être synchronisées")
+        sys.exit(1)
+    else:
+        print("Synchronisation terminée avec succès!")
 
 if __name__ == "__main__":
     main()
