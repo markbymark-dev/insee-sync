@@ -17,7 +17,7 @@ def download_and_extract_csv(url):
     try:
         response = requests.get(url, timeout=300)
         response.raise_for_status()
-
+        
         with zipfile.ZipFile(io.BytesIO(response.content)) as z:
             csv_filename = z.namelist()[0]
             print(f"Extraction de {csv_filename}...")
@@ -31,7 +31,7 @@ def download_and_extract_csv(url):
 def parse_insee_csv(csv_content):
     reader = csv.DictReader(io.StringIO(csv_content), delimiter=';')
     records = []
-
+    
     for row in reader:
         date_naissance = None
         if row.get('Date naissance'):
@@ -39,14 +39,14 @@ def parse_insee_csv(csv_content):
                 date_naissance = datetime.strptime(row['Date naissance'], '%Y%m%d').date().isoformat()
             except:
                 pass
-
+        
         date_deces = None
         if row.get('Date décès'):
             try:
                 date_deces = datetime.strptime(row['Date décès'], '%Y%m%d').date().isoformat()
             except:
                 pass
-
+        
         record = {
             'nom': row.get('Nom', '').strip(),
             'prenoms': row.get('Prénoms', '').strip(),
@@ -59,7 +59,7 @@ def parse_insee_csv(csv_content):
             'numero_acte': row.get('Numéro acte', '').strip()
         }
         records.append(record)
-
+    
     return records
 
 def batch_insert_to_supabase(supabase: Client, records, batch_size=1000):
@@ -68,7 +68,7 @@ def batch_insert_to_supabase(supabase: Client, records, batch_size=1000):
     
     failed_batches = 0
     successful_batches = 0
-
+    
     for i in range(0, total, batch_size):
         batch = records[i:i + batch_size]
         try:
@@ -88,7 +88,7 @@ def batch_insert_to_supabase(supabase: Client, records, batch_size=1000):
     print(f"Succès: {successful_batches} batch(s) insérés")
 
 def main():
-    print("Démarrage de la synchronisation INSEE complète (1975-2025)...")
+    print("Démarrage de la synchronisation INSEE (2018-2025)...")
     
     if not SUPABASE_URL or not SUPABASE_KEY:
         print("ERREUR: Variables d'environnement SUPABASE_URL ou SUPABASE_KEY manquantes")
@@ -98,19 +98,20 @@ def main():
     
     total_records_inserted = 0
     years_failed = []
-
-    # Download all years from 1975 to 2025
-    for year in range(1975, 2026):
+    
+    # Download years from 2018 to 2025 (INSEE files before 2018 are no longer available)
+    for year in range(2018, 2026):
         print(f"\n=== Année {year} ===")
-
+        
         # Try annual file
         url = f"{INSEE_BASE_URL}/Deces_{year}.zip"
         csv_content = download_and_extract_csv(url)
-
+        
         if csv_content:
             try:
                 records = parse_insee_csv(csv_content)
                 print(f"{len(records)} enregistrements trouvés pour {year}")
+                
                 if records:
                     batch_insert_to_supabase(supabase, records)
                     total_records_inserted += len(records)
@@ -120,7 +121,7 @@ def main():
         else:
             print(f"Fichier annuel {year} non disponible")
             years_failed.append(year)
-
+    
     print(f"\n=== RÉSUMÉ ===")
     print(f"Total d'enregistrements insérés: {total_records_inserted}")
     
